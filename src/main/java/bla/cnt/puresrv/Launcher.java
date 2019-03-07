@@ -1,9 +1,9 @@
 package bla.cnt.puresrv;
 
-import bla.cnt.puresrv.messaging.Emcue;
-import bla.cnt.puresrv.messaging.Message;
-import bla.cnt.puresrv.messaging.Subscriber;
-import bla.cnt.puresrv.messaging.Topic;
+import bla.cnt.puresrv.emcue.Emcue;
+import bla.cnt.puresrv.emcue.Message;
+import bla.cnt.puresrv.emcue.Subscriber;
+import bla.cnt.puresrv.emcue.Topic;
 import bla.cnt.puresrv.service.Server;
 
 import java.time.Instant;
@@ -11,6 +11,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Launcher {
+
+    private static StringBuilder emcueLog = new StringBuilder();
 
     public static void main(String[] args) {
         createPublisher();
@@ -20,16 +22,14 @@ public class Launcher {
 
     private static void createEmcueWatcher() {
         Server s = Server.serverAt(8002);
-        StringBuilder emcueLog = new StringBuilder();
-        Emcue.INSTANCE.addListener(topic -> topic.subscribe((t, msg) ->
-            emcueLog
-                    .append("[")
-                    .append(Instant.now())
-                    .append("]|")
-                    .append(t.getName())
-                    .append("|: ")
-                    .append(msg.getContent())
-                    .append("<br>").append("\n")));
+        Emcue.EMCUE_ONE.subscribe((t, m) -> {
+            log(t, m);
+            if (m.getType() == Message.Type.TOPIC_CREATED) {
+                Topic createdTopic = Emcue.INSTANCE.byName(m.getPayload().toString());
+                createdTopic.subscribe(Launcher::log);
+            }
+
+        });
 
         s.registerEndpoint("/watch", ep -> {
             Map<String, Object> args = new HashMap<>();
@@ -42,13 +42,13 @@ public class Launcher {
         Server s = Server.serverAt(8001);
 
         Subscriber sub = (t, message) ->
-                System.out.printf("Server at %s received message from %s: %s\n", 8001, t, message.getContent());
+                System.out.printf("Server at %s received message from %s: %s\n", 8001, t, message.getPayload());
 
         s.registerEndpoint("/subscriber", ep -> ep.sendFile("subscriber.html"));
 
         s.registerEndpoint("/subscribe", ep -> {
             String topicName = ep.getParam("topicname");
-            Topic t = Emcue.INSTANCE.createTopicIfAbsent(topicName);
+            Topic t = Emcue.INSTANCE.createOrGet(topicName);
             t.subscribe(sub);
 
             ep.redirect("subscriber");
@@ -74,10 +74,20 @@ public class Launcher {
                 return;
             }
 
-            Emcue.INSTANCE.getTopicByName(topicName).publish(new Message<>().setContent(msg));
+            Emcue.INSTANCE.createOrGet(topicName).publish(Message.Type.SIMPLE.create(msg));
             ep.redirect("publisher");
         });
     }
 
+    private static void log(Topic t, Message m) {
+        emcueLog
+                .append("[")
+                .append(Instant.now())
+                .append("]|")
+                .append(t.getName())
+                .append("|: ")
+                .append(m.getPayload())
+                .append("<br>").append("\n");
+    }
 
 }
